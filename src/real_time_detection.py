@@ -2,9 +2,10 @@ import cv2
 import numpy as np
 from tensorflow.keras.models import load_model
 
-# Load the trained model with error handling
+# Load the trained model
 try:
-    emotion_model = load_model('./emotion_recognition_model.h5')
+    emotion_model = load_model('emotion_recognition_model_improved.h5')
+    print("Model loaded successfully!")
 except Exception as e:
     print(f"Error loading model: {e}")
     exit()
@@ -12,53 +13,70 @@ except Exception as e:
 # Emotion labels
 emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 
-# Initialize the webcam
-cap = cv2.VideoCapture(1)
+# Initialize DNN Face Detector
+face_net = cv2.dnn.readNetFromCaffe(
+    'deploy.prototxt',  # Prototxt file for the model architecture
+    'res10_300x300_ssd_iter_140000_fp16.caffemodel'  # Pretrained Caffe model
+)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to capture image.")
-        break
+# Initialize webcam
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("Error: Unable to access the webcam.")
+    exit()
 
-    # Convert frame to grayscale
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+print("Press 'q' to quit.")
 
-    # Detect faces
-    faces = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml").detectMultiScale(
-        gray, scaleFactor=1.3, minNeighbors=5
-    )
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Failed to capture an image.")
+            break
 
-    # If no faces detected, display message
-    if len(faces) == 0:
-        cv2.putText(frame, 'No face detected', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        # Prepare the image for the DNN detector
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
 
-    for (x, y, w, h) in faces:
-        # Extract face and preprocess it
-        roi_gray = gray[y:y + h, x:x + w]
-        roi_gray = cv2.resize(roi_gray, (48, 48)).reshape(1, 48, 48, 1) / 255.0
-        
-        # Debugging the shape
-        print(f"Processed image shape: {roi_gray.shape}")
+        # Detect faces
+        face_net.setInput(blob)
+        detections = face_net.forward()
 
-        # Predict emotion
-        predictions = emotion_model.predict(roi_gray)
-        
-        # Debugging predictions
-        print(f"Prediction: {predictions}")
+        # Process each detection
+        for i in range(detections.shape[2]):
+            confidence = detections[0, 0, i, 2]
+            if confidence > 0.5:  # Filter detections by confidence
+                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                (x, y, x2, y2) = box.astype('int')
 
-        emotion = emotion_labels[np.argmax(predictions)]
+                # Extract and preprocess face ROI
+                roi_gray = frame[y:y2, x:x2]
+                roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
+                roi_gray = cv2.resize(roi_gray, (48, 48))
+                roi_gray = roi_gray.astype('float32') / 255.0  # Normalize pixel values
+                roi_gray = np.expand_dims(roi_gray, axis=[0, -1])  # Add batch and channel dimensions
 
-        # Draw rectangle and label
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-        cv2.putText(frame, emotion, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+                # Predict emotion
+                predictions = emotion_model.predict(roi_gray, verbose=0)
+                max_index = np.argmax(predictions)
+                emotion = emotion_labels[max_index]
+                emotion_confidence = predictions[0][max_index] * 100
 
-    # Display the frame
-    cv2.imshow('Real-Time Emotion Detection', frame)
+                # Draw rectangle and emotion label
+                cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 2)
+                cv2.putText(frame, f"{emotion} ({emotion_confidence:.1f}%)", 
+                            (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
+                            (255, 255, 255), 2)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):  # Quit with 'q'
-        break
+        # Show frame
+        cv2.imshow('Real-Time Emotion Detection', frame)
 
-# Release resources
-cap.release()
-cv2.destroyAllWindows()
+        # Exit on 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+except KeyboardInterrupt:
+    print("\nProgram interrupted by user.")
+finally:
+    cap.release()
+    cv2.destroyAllWindows()
