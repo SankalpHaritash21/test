@@ -5,7 +5,7 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.optimizers.schedules import ExponentialDecay
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, CSVLogger
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import matplotlib.pyplot as plt
 
@@ -96,6 +96,7 @@ def train_model(model, train_generator, val_generator):
         initial_learning_rate=1e-3, decay_steps=10000, decay_rate=0.96, staircase=True
     )
 
+    # Optimizer with LearningRateSchedule
     optimizer = Adam(learning_rate=lr_schedule)
     model.compile(
         optimizer=optimizer, loss="categorical_crossentropy", metrics=["accuracy"]
@@ -104,7 +105,6 @@ def train_model(model, train_generator, val_generator):
     # Callbacks
     callbacks = [
         EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True, verbose=1),
-        ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=3, verbose=1),
         ModelCheckpoint("best_emotion_model.keras", monitor="val_loss", save_best_only=True, verbose=1),
         CSVLogger("training_log.csv", append=True),
     ]

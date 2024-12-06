@@ -4,7 +4,7 @@ from tensorflow.keras.models import load_model
 
 # Load the trained model
 try:
-    emotion_model = load_model('emotion_recognition_model_improved.h5')
+    emotion_model = load_model('D:/face/final_emotion_model.h5')
     print("Model loaded successfully!")
 except Exception as e:
     print(f"Error loading model: {e}")
@@ -13,17 +13,18 @@ except Exception as e:
 # Emotion labels
 emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 
-# Initialize DNN Face Detector
-face_net = cv2.dnn.readNetFromCaffe(
-    'deploy.prototxt',  # Prototxt file for the model architecture
-    'res10_300x300_ssd_iter_140000_fp16.caffemodel'  # Pretrained Caffe model
-)
+# Load Haar cascade for face detection
+haar_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
+cap = cv2.VideoCapture(1)
 # Initialize webcam
-cap = cv2.VideoCapture(0)
+
+
 if not cap.isOpened():
-    print("Error: Unable to access the webcam.")
-    exit()
+    print("Error: Unable to access the external webcam.")
+    cap = cv2.VideoCapture(0)
+else:
+    print("Internal webcam accessed successfully.")
 
 print("Press 'q' to quit.")
 
@@ -34,39 +35,30 @@ try:
             print("Error: Failed to capture an image.")
             break
 
-        # Prepare the image for the DNN detector
-        h, w = frame.shape[:2]
-        blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
+        # Convert to grayscale
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # Detect faces
-        face_net.setInput(blob)
-        detections = face_net.forward()
+        faces = haar_cascade.detectMultiScale(gray_frame, scaleFactor=1.3, minNeighbors=5, minSize=(48, 48))
 
-        # Process each detection
-        for i in range(detections.shape[2]):
-            confidence = detections[0, 0, i, 2]
-            if confidence > 0.5:  # Filter detections by confidence
-                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                (x, y, x2, y2) = box.astype('int')
+        for (x, y, w, h) in faces:
+            # Extract and preprocess face ROI
+            roi_gray = gray_frame[y:y+h, x:x+w]
+            roi_gray = cv2.resize(roi_gray, (48, 48))
+            roi_gray = roi_gray.astype('float32') / 255.0  # Normalize pixel values
+            roi_gray = np.expand_dims(roi_gray, axis=[0, -1])  # Add batch and channel dimensions
 
-                # Extract and preprocess face ROI
-                roi_gray = frame[y:y2, x:x2]
-                roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
-                roi_gray = cv2.resize(roi_gray, (48, 48))
-                roi_gray = roi_gray.astype('float32') / 255.0  # Normalize pixel values
-                roi_gray = np.expand_dims(roi_gray, axis=[0, -1])  # Add batch and channel dimensions
+            # Predict emotion
+            predictions = emotion_model.predict(roi_gray, verbose=0)
+            max_index = np.argmax(predictions)
+            emotion = emotion_labels[max_index]
+            emotion_confidence = predictions[0][max_index] * 100
 
-                # Predict emotion
-                predictions = emotion_model.predict(roi_gray, verbose=0)
-                max_index = np.argmax(predictions)
-                emotion = emotion_labels[max_index]
-                emotion_confidence = predictions[0][max_index] * 100
-
-                # Draw rectangle and emotion label
-                cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 2)
-                cv2.putText(frame, f"{emotion} ({emotion_confidence:.1f}%)", 
-                            (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
-                            (255, 255, 255), 2)
+            # Draw rectangle and emotion label
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            cv2.putText(frame, f"{emotion} ({emotion_confidence:.1f}%)", 
+                        (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 
+                        (255, 255, 255), 2)
 
         # Show frame
         cv2.imshow('Real-Time Emotion Detection', frame)
